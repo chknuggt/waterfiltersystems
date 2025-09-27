@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "447257588773",
+    "project_id": "waterfilternet-82513",
+    "storage_bucket": "waterfilternet-82513.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:447257588773:android:04c4112dc07d44a973fbcc",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "447257588773-tki3dg9rdvet5g5dflijmraurn6f1rsq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3gLi8PKnTBUfMuX66tpkmD-QFzTzBmd0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "447257588773-tki3dg9rdvet5g5dflijmraurn6f1rsq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

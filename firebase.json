@@ -1,0 +1,29 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "waterfilternet-82513",
+          "appId": "1:447257588773:android:04c4112dc07d44a973fbcc",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "waterfilternet-82513",
+          "configurations": {
+            "android": "1:447257588773:android:04c4112dc07d44a973fbcc",
+            "ios": "1:447257588773:ios:cf94eb6f1fd9789273fbcc",
+            "macos": "1:447257588773:ios:cf94eb6f1fd9789273fbcc",
+            "web": "1:447257588773:web:7b8396a5f35b5d5873fbcc",
+            "windows": "1:447257588773:web:93b74586e4b0fbc473fbcc"
+          }
+        }
+      }
+    }
+  }
+}
