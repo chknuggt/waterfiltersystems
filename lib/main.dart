@@ -9,7 +9,9 @@ import 'screens/checkout/checkout_screen.dart';
 import 'screens/address/address_management_screen.dart';
 import 'screens/payment/card_management_screen.dart';
 import 'screens/order/order_success_screen.dart';
+import 'screens/admin/admin_dashboard.dart';
 import 'core/theme/app_theme.dart';
+import 'core/guards/admin_guard.dart';
 import 'providers/cart_provider.dart';
 import 'providers/auth_provider.dart';
 import 'services/payment_service.dart';
@@ -90,14 +92,16 @@ class WaterFilterNetApp extends StatelessWidget {
         theme: AppTheme.lightTheme,
 
         // App metadata
-        home: const AuthWrapper(),
+        initialRoute: '/',
 
         routes: {
+          '/': (context) => const AuthWrapper(),
           '/auth': (context) => const AuthScreen(),
           '/home': (context) => const NavigationMenu(),
           '/checkout': (context) => const CheckoutScreen(),
           '/address_management': (context) => const AddressManagementScreen(),
           '/card_management': (context) => const CardManagementScreen(),
+          '/admin': (context) => const AdminGuard(child: AdminDashboard()),
         },
         onGenerateRoute: (settings) {
           switch (settings.name) {
@@ -113,6 +117,10 @@ class WaterFilterNetApp extends StatelessWidget {
 
         // Handle unknown routes
         onUnknownRoute: (RouteSettings settings) {
+          // Don't redirect admin routes to auth screen
+          if (settings.name?.startsWith('/admin') == true) {
+            return null; // Let onGenerateRoute handle admin routes
+          }
           return MaterialPageRoute<void>(
             settings: settings,
             builder: (BuildContext context) => const AuthScreen(),

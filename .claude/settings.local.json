@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(git stash:*)",
+      "Read(//home/marioselef/Pictures/Screenshots/**)"
     ],
     "deny": [],
     "ask": []

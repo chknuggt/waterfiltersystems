@@ -24,6 +24,12 @@ class AuthService {
   // Get current user
   User? get currentUser => _auth?.currentUser;
 
+  // Get current user with Firebase initialization
+  Future<User?> getCurrentUser() async {
+    await _ensureInitialized();
+    return _auth?.currentUser;
+  }
+
   // Auth state changes stream
   Stream<User?> get authStateChanges async* {
     try {
@@ -40,6 +46,7 @@ class AuthService {
     required String email,
     required String password,
     required String displayName,
+    UserRole role = UserRole.user,
   }) async {
     await _ensureInitialized();
 
@@ -61,6 +68,7 @@ class AuthService {
           displayName: displayName,
           createdAt: DateTime.now(),
           lastLogin: DateTime.now(),
+          role: role,
         );
 
         // Save user to Firestore
@@ -74,6 +82,20 @@ class AuthService {
       throw 'An unexpected error occurred. Please try again.';
     }
     return null;
+  }
+
+  // Create admin user
+  Future<UserModel?> createAdminUser({
+    required String email,
+    required String password,
+    required String displayName,
+  }) async {
+    return await signUpWithEmailAndPassword(
+      email: email,
+      password: password,
+      displayName: displayName,
+      role: UserRole.admin,
+    );
   }
 
   // Sign in with email and password
@@ -197,6 +219,163 @@ class AuthService {
         return 'Network error. Please check your connection.';
       default:
         return 'Authentication failed. Please try again.';
+    }
+  }
+
+  // Check if current user is admin using custom claims
+  Future<bool> isCurrentUserAdmin() async {
+    try {
+      await _ensureInitialized();
+      final user = await getCurrentUser();
+      if (user != null) {
+        print('Checking admin status for user: ${user.email}');
+        final idTokenResult = await user.getIdTokenResult();
+        print('Token issued at: ${idTokenResult.issuedAtTime}');
+        print('Token auth time: ${idTokenResult.authTime}');
+        print('All claims: ${idTokenResult.claims}');
+
+        final role = idTokenResult.claims?['role'];
+        print('Role claim value: $role');
+
+        final isAdmin = role == 'admin';
+        print('Is admin result: $isAdmin');
+        return isAdmin;
+      } else {
+        print('No current user found');
+      }
+    } catch (e) {
+      print('Error checking admin status: $e');
+    }
+    return false;
+  }
+
+  // Get user's company from custom claims
+  Future<String?> getUserCompany() async {
+    try {
+      await _ensureInitialized();
+      final user = await getCurrentUser();
+      if (user != null) {
+        final idTokenResult = await user.getIdTokenResult();
+        final company = idTokenResult.claims?['company'];
+        print('Company claim: $company');
+        return company;
+      }
+    } catch (e) {
+      print('Error getting user company: $e');
+    }
+    return null;
+  }
+
+  // Debug method to print all claims
+  Future<void> debugPrintAllClaims() async {
+    try {
+      await _ensureInitialized();
+      final user = await getCurrentUser();
+      if (user != null) {
+        print('=== DEBUG: Current User Claims ===');
+        print('User email: ${user.email}');
+        print('User UID: ${user.uid}');
+        print('Email verified: ${user.emailVerified}');
+
+        final idTokenResult = await user.getIdTokenResult();
+        print('Token issued at: ${idTokenResult.issuedAtTime}');
+        print('Token expires at: ${idTokenResult.expirationTime}');
+        print('Token auth time: ${idTokenResult.authTime}');
+        print('All custom claims:');
+
+        if (idTokenResult.claims?.isEmpty ?? true) {
+          print('  No custom claims found!');
+        } else {
+          idTokenResult.claims?.forEach((key, value) {
+            print('  $key: $value');
+          });
+        }
+        print('=== END DEBUG ===');
+      } else {
+        print('=== DEBUG: No current user ===');
+      }
+    } catch (e) {
+      print('Error debugging claims: $e');
+    }
+  }
+
+  // Update email address with reauthentication
+  Future<void> updateUserEmail(String newEmail, String currentPassword) async {
+    await _ensureInitialized();
+
+    final user = currentUser;
+    if (user == null) throw 'User not authenticated';
+
+    try {
+      // Reauthenticate user first
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+
+      // Update email (this sends verification email automatically)
+      await user.verifyBeforeUpdateEmail(newEmail);
+
+      // Update in Firestore
+      await _firestore!.collection('users').doc(user.uid).update({
+        'email': newEmail,
+      });
+
+    } on FirebaseAuthException catch (e) {
+      throw _handleAuthException(e);
+    } catch (e) {
+      throw 'Failed to update email. Please try again.';
+    }
+  }
+
+  // Update password with reauthentication
+  Future<void> updateUserPassword(String currentPassword, String newPassword) async {
+    await _ensureInitialized();
+
+    final user = currentUser;
+    if (user == null) throw 'User not authenticated';
+
+    try {
+      // Reauthenticate user first
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+
+      // Update password
+      await user.updatePassword(newPassword);
+
+    } on FirebaseAuthException catch (e) {
+      throw _handleAuthException(e);
+    } catch (e) {
+      throw 'Failed to update password. Please try again.';
+    }
+  }
+
+  // Force refresh ID token to get latest custom claims
+  Future<void> refreshUserToken() async {
+    try {
+      await _ensureInitialized();
+      final user = await getCurrentUser();
+      if (user != null) {
+        print('Refreshing token for user: ${user.email}');
+        final oldToken = await user.getIdToken(false);
+        print('Old token (first 50 chars): ${oldToken?.substring(0, 50) ?? 'null'}...');
+
+        final newToken = await user.getIdToken(true); // Force refresh
+        print('New token (first 50 chars): ${newToken?.substring(0, 50) ?? 'null'}...');
+        print('Token refreshed successfully');
+
+        // Get the new claims
+        final idTokenResult = await user.getIdTokenResult(true);
+        print('New claims after refresh: ${idTokenResult.claims}');
+      } else {
+        print('No user to refresh token for');
+      }
+    } catch (e) {
+      print('Error refreshing token: $e');
     }
   }
 }

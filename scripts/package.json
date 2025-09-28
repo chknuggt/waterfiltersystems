@@ -1,0 +1,17 @@
+{
+  "name": "waterfilternet-admin-scripts",
+  "version": "1.0.0",
+  "description": "Admin management scripts for WaterFilterNet",
+  "main": "admin-manager.js",
+  "scripts": {
+    "add-admin": "node admin-manager.js add-admin",
+    "remove-admin": "node admin-manager.js remove-admin",
+    "list-admins": "node admin-manager.js list-admins",
+    "check-admin": "node admin-manager.js check-admin"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  },
+  "author": "WaterFilterNet Team",
+  "license": "ISC"
+}

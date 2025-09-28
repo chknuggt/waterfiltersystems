@@ -80,7 +80,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         );
 
         if (user != null && mounted) {
-          Navigator.of(context).pushReplacementNamed('/home');
+          // Check if user is admin and redirect accordingly
+          if (user.isAdmin) {
+            Navigator.of(context).pushReplacementNamed('/admin');
+          } else {
+            Navigator.of(context).pushReplacementNamed('/home');
+          }
         }
       } else {
         // Sign up

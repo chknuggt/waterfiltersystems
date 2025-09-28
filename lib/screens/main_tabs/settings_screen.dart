@@ -3,8 +3,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:waterfilternet/core/theme/app_theme.dart';
 import 'package:waterfilternet/widgets/buttons/primary_button.dart';
 import 'package:waterfilternet/widgets/common/section_header.dart';
+import 'package:waterfilternet/widgets/dialogs/change_email_dialog.dart';
+import 'package:waterfilternet/widgets/dialogs/change_password_dialog.dart';
 import 'package:waterfilternet/utils/demo_data_initializer.dart';
 import 'package:waterfilternet/models/user_model.dart';
+import 'package:waterfilternet/services/auth_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -22,23 +25,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String selectedCurrency = 'EUR (€)';
   bool _isInitializingDemoData = false;
   bool _isAdmin = false;
+  final _authService = AuthService();
 
   @override
   void initState() {
     super.initState();
-    _checkAdminStatus();
+    _refreshAdminStatusAndCheckAdmin();
+  }
+
+  Future<void> _refreshAdminStatusAndCheckAdmin() async {
+    try {
+      // Force refresh the authentication token to get latest custom claims
+      await _authService.refreshUserToken();
+
+      // Wait a moment for token to refresh
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final isAdmin = await _authService.isCurrentUserAdmin();
+      setState(() {
+        _isAdmin = isAdmin;
+      });
+
+      print('Admin status refreshed: $_isAdmin');
+    } catch (e) {
+      print('Error checking admin status: $e');
+    }
   }
 
   Future<void> _checkAdminStatus() async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final result = await user.getIdTokenResult();
-        final role = result.claims?['role'];
-        setState(() {
-          _isAdmin = role == 'admin';
-        });
-      }
+      final isAdmin = await _authService.isCurrentUserAdmin();
+      setState(() {
+        _isAdmin = isAdmin;
+      });
     } catch (e) {
       print('Error checking admin status: $e');
     }
@@ -163,12 +182,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'Privacy & Security',
                   [
                     _buildNavigationTile(
+                      icon: Icons.email_outlined,
+                      title: 'Change Email',
+                      subtitle: 'Update your email address',
+                      onTap: _showChangeEmailDialog,
+                    ),
+                    _buildNavigationTile(
                       icon: Icons.security_outlined,
                       title: 'Change Password',
                       subtitle: 'Update your account password',
-                      onTap: () {
-                        // TODO: Navigate to change password
-                      },
+                      onTap: _showChangePasswordDialog,
                     ),
                     _buildNavigationTile(
                       icon: Icons.fingerprint_outlined,
@@ -188,6 +211,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           marketingEmails = value;
                         });
                       },
+                    ),
+                    _buildNavigationTile(
+                      icon: Icons.refresh_outlined,
+                      title: 'Refresh Admin Status',
+                      subtitle: 'Update admin permissions if recently changed',
+                      onTap: _refreshAdminStatus,
+                    ),
+                    _buildNavigationTile(
+                      icon: Icons.bug_report_outlined,
+                      title: 'Debug Claims',
+                      subtitle: 'Show all Firebase custom claims for debugging',
+                      onTap: _debugClaims,
+                    ),
+                    _buildNavigationTile(
+                      icon: Icons.logout_outlined,
+                      title: 'Force Logout & Login',
+                      subtitle: 'Complete logout to get fresh token',
+                      onTap: _forceLogout,
                     ),
                     _buildNavigationTile(
                       icon: Icons.privacy_tip_outlined,
@@ -261,13 +302,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         title: 'Admin Dashboard',
                         subtitle: 'Access admin management tools',
                         onTap: () {
-                          // TODO: Navigate to admin dashboard
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Admin dashboard coming soon'),
-                              backgroundColor: AppTheme.primaryTeal,
-                            ),
-                          );
+                          Navigator.pushNamed(context, '/admin');
                         },
                       ),
                     ],
@@ -831,6 +866,164 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           );
         }
+      }
+    }
+  }
+
+  // Professional email and password change methods
+  void _showChangePasswordDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => const ChangePasswordDialog(),
+    );
+  }
+
+  void _showChangeEmailDialog() {
+    final currentUser = _authService.currentUser;
+    if (currentUser?.email != null) {
+      showDialog(
+        context: context,
+        builder: (context) => ChangeEmailDialog(
+          currentEmail: currentUser!.email!,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to get current email address'),
+          backgroundColor: AppTheme.errorRed,
+        ),
+      );
+    }
+  }
+
+  Future<void> _refreshAdminStatus() async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Refreshing admin status...'),
+          backgroundColor: AppTheme.primaryTeal,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      await _refreshAdminStatusAndCheckAdmin();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isAdmin
+                ? 'Admin access confirmed! ✅'
+                : 'No admin access found'),
+            backgroundColor: _isAdmin
+                ? AppTheme.successGreen
+                : AppTheme.neutralGray600,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error refreshing admin status: $e'),
+            backgroundColor: AppTheme.errorRed,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _debugClaims() async {
+    try {
+      await _authService.debugPrintAllClaims();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Debug info printed to console'),
+            backgroundColor: AppTheme.primaryTeal,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Debug error: $e'),
+            backgroundColor: AppTheme.errorRed,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _forceLogout() async {
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text(
+            'Force Logout',
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: const Text(
+            'This will log you out completely. You\'ll need to login again with mariosano333@gmail.com to get a fresh token with admin claims.',
+            style: TextStyle(fontFamily: 'Poppins'),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSizing.radiusLarge),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            PrimaryButton(
+              text: 'Logout',
+              onPressed: () => Navigator.pop(context, true),
+              size: ButtonSize.small,
+              variant: ButtonVariant.secondary,
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed == true) {
+        await _authService.signOut();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Logged out successfully. Please login again.'),
+              backgroundColor: AppTheme.successGreen,
+              duration: Duration(seconds: 3),
+            ),
+          );
+
+          // Navigate to auth screen
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            '/auth',
+            (route) => false,
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Logout error: $e'),
+            backgroundColor: AppTheme.errorRed,
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     }
   }
