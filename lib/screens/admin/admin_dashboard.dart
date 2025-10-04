@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
+import '../../widgets/admin/overview_dashboard.dart';
 import '../../widgets/admin/service_requests_view.dart';
 import '../../widgets/admin/calendar_view.dart';
 import '../../widgets/admin/customers_view.dart';
@@ -11,29 +12,83 @@ class AdminDashboard extends StatefulWidget {
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
+class _AdminDashboardState extends State<AdminDashboard> with AutomaticKeepAliveClientMixin {
   int _selectedIndex = 0;
 
-  final List<Map<String, dynamic>> _tabs = [
-    {
-      'title': 'Service Requests',
-      'icon': Icons.build_outlined,
-      'widget': const ServiceRequestsView(),
-    },
-    {
-      'title': 'Calendar',
-      'icon': Icons.calendar_today_outlined,
-      'widget': const CalendarView(),
-    },
-    {
-      'title': 'Customers',
-      'icon': Icons.people_outline,
-      'widget': const CustomersView(),
-    },
-  ];
+  // Keep widgets alive to preserve their state
+  late final List<Widget> _tabWidgets;
+  late final List<Map<String, dynamic>> _tabs;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Initialize widgets once to preserve state
+    _tabWidgets = [
+      const OverviewDashboard(key: PageStorageKey('overview')),
+      const ServiceRequestsView(key: PageStorageKey('service_requests')),
+      const CalendarView(key: PageStorageKey('calendar')),
+      const CustomersView(key: PageStorageKey('customers')),
+    ];
+
+    _tabs = [
+      {
+        'title': 'Overview',
+        'icon': Icons.dashboard_outlined,
+        'widget': _tabWidgets[0],
+      },
+      {
+        'title': 'Service Requests',
+        'icon': Icons.build_outlined,
+        'widget': _tabWidgets[1],
+      },
+      {
+        'title': 'Calendar',
+        'icon': Icons.calendar_today_outlined,
+        'widget': _tabWidgets[2],
+      },
+      {
+        'title': 'Customers',
+        'icon': Icons.people_outline,
+        'widget': _tabWidgets[3],
+      },
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    final isDesktop = MediaQuery.of(context).size.width > 768;
+
+    if (!isDesktop) {
+      // Mobile layout with bottom navigation
+      return Scaffold(
+        backgroundColor: const Color(0xFFF8F9FA),
+        body: SafeArea(
+          child: IndexedStack(
+            index: _selectedIndex,
+            children: _tabWidgets,
+          ),
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (index) {
+            setState(() {
+              _selectedIndex = index;
+            });
+          },
+          destinations: _tabs.map((tab) => NavigationDestination(
+            icon: Icon(tab['icon']),
+            label: tab['title'],
+          )).toList(),
+        ),
+      );
+    }
+
+    // Desktop layout with sidebar
     return Scaffold(
       body: Row(
         children: [
@@ -217,9 +272,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ),
 
-                // Content
+                // Content - Use IndexedStack to keep all tabs alive in memory
                 Expanded(
-                  child: _tabs[_selectedIndex]['widget'],
+                  child: IndexedStack(
+                    index: _selectedIndex,
+                    children: _tabWidgets,
+                  ),
                 ),
               ],
             ),

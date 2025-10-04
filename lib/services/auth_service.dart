@@ -61,11 +61,12 @@ class AuthService {
         // Update display name
         await userCredential.user!.updateDisplayName(displayName);
 
-        // Create user model
+        // Create user model with minimal info
         final UserModel newUser = UserModel(
           uid: userCredential.user!.uid,
           email: email,
           displayName: displayName,
+          phoneNumber: '', // User can add this later
           createdAt: DateTime.now(),
           lastLogin: DateTime.now(),
           role: role,
@@ -113,11 +114,6 @@ class AuthService {
       );
 
       if (userCredential.user != null) {
-        // Update last login time in Firestore
-        await _firestore!.collection('users').doc(userCredential.user!.uid).update({
-          'lastLogin': DateTime.now().toIso8601String(),
-        });
-
         // Get user data from Firestore
         final DocumentSnapshot userDoc = await _firestore!
             .collection('users')
@@ -125,13 +121,44 @@ class AuthService {
             .get();
 
         if (userDoc.exists) {
+          // User exists in Firestore, update last login
+          await _firestore!.collection('users').doc(userCredential.user!.uid).update({
+            'lastLogin': DateTime.now().toIso8601String(),
+          });
           return UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
+        } else {
+          // User exists in Auth but not in Firestore - create the document
+          print('User ${email} exists in Auth but not in Firestore. Creating document...');
+
+          // Check if this user has admin custom claims
+          final idTokenResult = await userCredential.user!.getIdTokenResult();
+          final role = idTokenResult.claims?['role'] == 'admin' ? UserRole.admin : UserRole.user;
+
+          // Create simple user model with minimal data
+          final UserModel newUser = UserModel(
+            uid: userCredential.user!.uid,
+            email: email,
+            displayName: userCredential.user!.displayName ?? email.split('@')[0],
+            photoUrl: null, // Don't store photos
+            phoneNumber: userCredential.user!.phoneNumber ?? '', // Empty if not set
+            createdAt: userCredential.user!.metadata.creationTime ?? DateTime.now(),
+            lastLogin: DateTime.now(),
+            isEmailVerified: userCredential.user!.emailVerified,
+            role: role,
+            marketingConsent: false, // Default to no marketing
+          );
+
+          // Save user to Firestore
+          await _firestore!.collection('users').doc(userCredential.user!.uid).set(newUser.toMap());
+          print('Created Firestore document for user ${email}');
+
+          return newUser;
         }
       }
     } on FirebaseAuthException catch (e) {
       throw _handleAuthException(e);
     } catch (e) {
-      throw 'An unexpected error occurred. Please try again.';
+      throw 'An unexpected error occurred: $e';
     }
     return null;
   }
@@ -179,22 +206,85 @@ class AuthService {
     }
   }
 
-  // Delete account
+  // Delete account - GDPR compliant
   Future<void> deleteAccount() async {
     await _ensureInitialized();
 
     try {
       final user = _auth!.currentUser;
       if (user != null) {
-        // Delete user data from Firestore
-        await _firestore!.collection('users').doc(user.uid).delete();
-        // Delete user from Firebase Auth
+        final userId = user.uid;
+
+        // 1. Delete or anonymize orders (keep for accounting but remove personal info)
+        final ordersSnapshot = await _firestore!
+            .collection('orders')
+            .where('userId', isEqualTo: userId)
+            .get();
+
+        for (final doc in ordersSnapshot.docs) {
+          // Anonymize order - keep for accounting but remove personal data
+          await doc.reference.update({
+            'userId': 'deleted_user',
+            'shippingAddress': {
+              'firstName': 'DELETED',
+              'lastName': 'USER',
+              'phoneNumber': 'DELETED',
+              'addressLine1': 'DELETED',
+              'addressLine2': '',
+              'city': 'DELETED',
+              'state': 'DELETED',
+              'postalCode': 'DELETED',
+            },
+            'billingAddress': {
+              'firstName': 'DELETED',
+              'lastName': 'USER',
+              'phoneNumber': 'DELETED',
+              'addressLine1': 'DELETED',
+              'addressLine2': '',
+              'city': 'DELETED',
+              'state': 'DELETED',
+              'postalCode': 'DELETED',
+            },
+            'paymentCard': {
+              'cardHolderName': 'DELETED USER',
+              'lastFourDigits': '****',
+              'maskedNumber': '************',
+            },
+          });
+        }
+
+        // 2. Delete user's addresses
+        final addressesSnapshot = await _firestore!
+            .collection('addresses')
+            .where('userId', isEqualTo: userId)
+            .get();
+
+        for (final doc in addressesSnapshot.docs) {
+          await doc.reference.delete();
+        }
+
+        // 3. Delete user's payment cards
+        final cardsSnapshot = await _firestore!
+            .collection('payment_cards')
+            .where('userId', isEqualTo: userId)
+            .get();
+
+        for (final doc in cardsSnapshot.docs) {
+          await doc.reference.delete();
+        }
+
+        // 4. Delete user document from users collection
+        await _firestore!.collection('users').doc(userId).delete();
+
+        // 5. Finally, delete user from Firebase Auth
         await user.delete();
+
+        print('Successfully deleted account and all personal data for user: $userId');
       }
     } on FirebaseAuthException catch (e) {
       throw _handleAuthException(e);
     } catch (e) {
-      throw 'Failed to delete account. Please try again.';
+      throw 'Failed to delete account. Please try again. Error: $e';
     }
   }
 
@@ -376,6 +466,148 @@ class AuthService {
       }
     } catch (e) {
       print('Error refreshing token: $e');
+    }
+  }
+
+  // Get all users from Firestore (Admin only)
+  Future<List<UserModel>> getAllUsers() async {
+    await _ensureInitialized();
+
+    try {
+      // Check if current user is admin
+      final isAdmin = await isCurrentUserAdmin();
+      if (!isAdmin) {
+        throw 'Unauthorized: Only admins can access all users';
+      }
+
+      // Fetch all users from Firestore
+      final QuerySnapshot usersSnapshot = await _firestore!
+          .collection('users')
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      // Convert documents to UserModel list
+      final List<UserModel> users = usersSnapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return UserModel.fromMap(data);
+      }).toList();
+
+      return users;
+    } catch (e) {
+      print('Error fetching all users: $e');
+      throw 'Failed to fetch users: $e';
+    }
+  }
+
+  // Get users count (Admin only)
+  Future<int> getUsersCount() async {
+    await _ensureInitialized();
+
+    try {
+      // Check if current user is admin
+      final isAdmin = await isCurrentUserAdmin();
+      if (!isAdmin) {
+        throw 'Unauthorized: Only admins can access user count';
+      }
+
+      final AggregateQuerySnapshot snapshot = await _firestore!
+          .collection('users')
+          .count()
+          .get();
+
+      return snapshot.count ?? 0;
+    } catch (e) {
+      print('Error getting users count: $e');
+      return 0;
+    }
+  }
+
+  // Search users by email or name (Admin only)
+  Future<List<UserModel>> searchUsers(String query) async {
+    await _ensureInitialized();
+
+    try {
+      // Check if current user is admin
+      final isAdmin = await isCurrentUserAdmin();
+      if (!isAdmin) {
+        throw 'Unauthorized: Only admins can search users';
+      }
+
+      // For now, fetch all users and filter locally
+      // (Firestore doesn't support case-insensitive search natively)
+      final allUsers = await getAllUsers();
+
+      final searchQuery = query.toLowerCase();
+      return allUsers.where((user) {
+        return user.email.toLowerCase().contains(searchQuery) ||
+               user.displayName.toLowerCase().contains(searchQuery) ||
+               (user.phoneNumber?.contains(searchQuery) ?? false);
+      }).toList();
+    } catch (e) {
+      print('Error searching users: $e');
+      throw 'Failed to search users: $e';
+    }
+  }
+
+  // Ensure user exists in Firestore (for existing Auth users)
+  Future<UserModel?> ensureUserInFirestore(User authUser) async {
+    await _ensureInitialized();
+
+    try {
+      // Check if user already exists in Firestore
+      final DocumentSnapshot userDoc = await _firestore!
+          .collection('users')
+          .doc(authUser.uid)
+          .get();
+
+      if (userDoc.exists) {
+        return UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
+      }
+
+      // User doesn't exist in Firestore, create them
+      print('Creating Firestore document for existing Auth user: ${authUser.email}');
+
+      // Check for admin custom claims
+      final idTokenResult = await authUser.getIdTokenResult();
+      final role = idTokenResult.claims?['role'] == 'admin' ? UserRole.admin : UserRole.user;
+
+      // Create simple user model - only essential info
+      final UserModel newUser = UserModel(
+        uid: authUser.uid,
+        email: authUser.email ?? '',
+        displayName: authUser.displayName ?? authUser.email?.split('@')[0] ?? 'User',
+        photoUrl: null, // Don't store photos
+        phoneNumber: authUser.phoneNumber ?? '', // Will be empty if not set
+        createdAt: authUser.metadata.creationTime ?? DateTime.now(),
+        lastLogin: DateTime.now(),
+        isEmailVerified: authUser.emailVerified,
+        role: role,
+        marketingConsent: false, // Default no marketing
+      );
+
+      // Save to Firestore
+      await _firestore!.collection('users').doc(authUser.uid).set(newUser.toMap());
+      print('Successfully created Firestore document for ${authUser.email}');
+
+      return newUser;
+    } catch (e) {
+      print('Error ensuring user in Firestore: $e');
+      return null;
+    }
+  }
+
+  // Initialize current logged-in user in Firestore (call this after login)
+  Future<void> initializeCurrentUser() async {
+    await _ensureInitialized();
+
+    try {
+      final user = _auth?.currentUser;
+      if (user != null) {
+        print('Initializing user ${user.email} in Firestore...');
+        await ensureUserInFirestore(user);
+      }
+    } catch (e) {
+      print('Error initializing current user: $e');
     }
   }
 }

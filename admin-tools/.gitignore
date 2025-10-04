@@ -1,0 +1,12 @@
+
+# Firebase Admin SDK
+admin-tools/serviceAccountKey.json
+serviceAccountKey.json
+
+# Firebase Admin SDK - IMPORTANT: Never commit these!
+admin-tools/serviceAccountKey.json
+serviceAccountKey.json
+*.serviceAccountKey.json
+
+# Node modules for admin tools
+admin-tools/node_modules/

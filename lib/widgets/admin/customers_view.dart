@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/user_model.dart';
-import '../../models/service_profile.dart';
 import '../../services/auth_service.dart';
 
 class CustomersView extends StatefulWidget {
@@ -11,89 +11,109 @@ class CustomersView extends StatefulWidget {
   State<CustomersView> createState() => _CustomersViewState();
 }
 
-class _CustomersViewState extends State<CustomersView> {
+class _CustomersViewState extends State<CustomersView> with AutomaticKeepAliveClientMixin {
   final AuthService _authService = AuthService();
-  List<UserModel> _customers = [];
-  Map<String, List<ServiceProfile>> _customerProfiles = {};
-  bool _isLoading = true;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   String _searchQuery = '';
+  bool _hasInitialized = false;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _loadCustomers();
+    _initializeCurrentUser();
   }
 
-  Future<void> _loadCustomers() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      // TODO: Implement getAllUsers in AuthService
-      // For now, create demo data
-      final demoCustomers = [
-        UserModel(
-          uid: 'demo-customer-1',
-          email: 'john.doe@example.com',
-          displayName: 'John Doe',
-          createdAt: DateTime.now().subtract(const Duration(days: 30)),
-          lastLogin: DateTime.now().subtract(const Duration(hours: 2)),
-        ),
-        UserModel(
-          uid: 'demo-customer-2',
-          email: 'maria.smith@example.com',
-          displayName: 'Maria Smith',
-          createdAt: DateTime.now().subtract(const Duration(days: 15)),
-          lastLogin: DateTime.now().subtract(const Duration(days: 1)),
-        ),
-        UserModel(
-          uid: 'demo-customer-3',
-          email: 'andreas.kyriakou@example.com',
-          displayName: 'Andreas Kyriakou',
-          createdAt: DateTime.now().subtract(const Duration(days: 45)),
-          lastLogin: DateTime.now().subtract(const Duration(hours: 5)),
-        ),
-      ];
-
-      setState(() {
-        _customers = demoCustomers;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading customers: $e')),
-        );
-      }
+  Future<void> _initializeCurrentUser() async {
+    if (!_hasInitialized) {
+      await _authService.initializeCurrentUser();
+      _hasInitialized = true;
     }
   }
 
-  List<UserModel> get _filteredCustomers {
-    if (_searchQuery.isEmpty) {
-      return _customers;
-    }
-    return _customers.where((customer) {
-      return customer.displayName?.toLowerCase().contains(_searchQuery.toLowerCase()) == true ||
-          customer.email.toLowerCase().contains(_searchQuery.toLowerCase());
-    }).toList();
-  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Search Bar
-          Row(
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 768;
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore.collection('users').orderBy('createdAt', descending: true).snapshots(),
+      builder: (context, snapshot) {
+        // Handle loading state
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        // Handle errors
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 64, color: Colors.red[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'Error loading customers',
+                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  snapshot.error.toString(),
+                  style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {}); // Trigger rebuild
+                  },
+                  icon: Icon(Icons.refresh),
+                  label: Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryTeal,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Parse customers from snapshot
+        final List<UserModel> allCustomers = [];
+        if (snapshot.hasData) {
+          for (var doc in snapshot.data!.docs) {
+            try {
+              final data = doc.data() as Map<String, dynamic>;
+              allCustomers.add(UserModel.fromMap(data));
+            } catch (e) {
+              debugPrint('Error parsing customer document: $e');
+            }
+          }
+        }
+
+        // Apply search filter
+        final filteredCustomers = _searchQuery.isEmpty
+            ? allCustomers
+            : allCustomers.where((customer) {
+                return customer.displayName.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+                       customer.email.toLowerCase().contains(_searchQuery.toLowerCase());
+              }).toList();
+
+        return Container(
+          padding: EdgeInsets.all(isMobile ? 16 : 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: TextField(
+          // Search Bar and Actions
+          if (isMobile)
+            Column(
+              children: [
+                TextField(
                   decoration: InputDecoration(
                     labelText: 'Search customers',
                     prefixIcon: Icon(Icons.search, color: AppTheme.primaryTeal),
@@ -115,39 +135,115 @@ class _CustomersViewState extends State<CustomersView> {
                     });
                   },
                 ),
-              ),
-              const SizedBox(width: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryTeal.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.primaryTeal.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                const SizedBox(height: 12),
+                Row(
                   children: [
-                    Icon(Icons.people, color: AppTheme.primaryTeal, size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${_filteredCustomers.length} customers',
-                      style: TextStyle(
-                        color: AppTheme.primaryTeal,
-                        fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryTeal.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.primaryTeal.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.people, color: AppTheme.primaryTeal, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${filteredCustomers.length} users',
+                              style: TextStyle(
+                                color: AppTheme.primaryTeal,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: () {
+                        setState(() {}); // Trigger rebuild which refreshes stream
+                      },
+                      icon: Icon(Icons.refresh, color: AppTheme.primaryTeal),
+                      tooltip: 'Refresh',
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    decoration: InputDecoration(
+                      labelText: 'Search customers',
+                      prefixIcon: Icon(Icons.search, color: AppTheme.primaryTeal),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: AppTheme.primaryTeal, width: 2),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryTeal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.primaryTeal.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.people, color: AppTheme.primaryTeal, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${filteredCustomers.length} users',
+                        style: TextStyle(
+                          color: AppTheme.primaryTeal,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: () {
+                    setState(() {}); // Trigger rebuild which refreshes stream
+                  },
+                  icon: Icon(Icons.refresh),
+                  tooltip: 'Refresh',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.primaryTeal,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
           const SizedBox(height: 24),
 
           // Customers List
           Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _filteredCustomers.isEmpty
+            child: filteredCustomers.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -165,25 +261,48 @@ class _CustomersViewState extends State<CustomersView> {
                                 color: Colors.grey[600],
                               ),
                             ),
+                            const SizedBox(height: 24),
+                            Text(
+                              'Users may exist in Authentication but not in database',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                // Initialize current user in Firestore
+                                await _initializeCurrentUser();
+                                setState(() {}); // Refresh the stream
+                              },
+                              icon: Icon(Icons.sync),
+                              label: Text('Initialize & Refresh'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primaryTeal,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
                           ],
                         ),
                       )
                     : ListView.builder(
-                        itemCount: _filteredCustomers.length,
+                        itemCount: filteredCustomers.length,
                         itemBuilder: (context, index) {
-                          final customer = _filteredCustomers[index];
+                          final customer = filteredCustomers[index];
                           return _buildCustomerCard(customer);
                         },
                       ),
           ),
-        ],
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildCustomerCard(UserModel customer) {
-    final isOnline = customer.lastLogin != null &&
-        DateTime.now().difference(customer.lastLogin!).inHours < 24;
+    final isOnline = DateTime.now().difference(customer.lastLogin).inHours < 24;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -218,12 +337,37 @@ class _CustomersViewState extends State<CustomersView> {
                       Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              customer.displayName ?? 'No name',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    customer.displayName.isNotEmpty ? customer.displayName : 'No name',
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (customer.role == UserRole.admin) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange[50],
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.orange[300]!),
+                                    ),
+                                    child: Text(
+                                      'ADMIN',
+                                      style: TextStyle(
+                                        color: Colors.orange[700],
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                           Container(
@@ -277,16 +421,14 @@ class _CustomersViewState extends State<CustomersView> {
             const SizedBox(height: 16),
 
             // Customer Stats
-            Row(
+            Wrap(
+              spacing: 24,
+              runSpacing: 12,
               children: [
                 _buildStatItem(Icons.access_time, 'Member since',
                     '${customer.createdAt.day}/${customer.createdAt.month}/${customer.createdAt.year}'),
-                const SizedBox(width: 24),
                 _buildStatItem(Icons.login, 'Last login',
-                    customer.lastLogin != null
-                        ? _formatLastLogin(customer.lastLogin!)
-                        : 'Never'),
-                const SizedBox(width: 24),
+                    _formatLastLogin(customer.lastLogin)),
                 _buildStatItem(Icons.build, 'Service Profiles', '0'), // TODO: Get actual count
               ],
             ),

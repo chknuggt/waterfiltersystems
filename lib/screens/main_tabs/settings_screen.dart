@@ -751,15 +751,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           PrimaryButton(
             text: 'Delete',
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              // TODO: Implement account deletion
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Account deletion requested'),
-                  backgroundColor: AppTheme.errorRed,
+
+              // Show loading indicator
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(
+                  child: CircularProgressIndicator(),
                 ),
               );
+
+              try {
+                // Delete the account
+                await _authService.deleteAccount();
+
+                // Close loading dialog
+                if (mounted) Navigator.pop(context);
+
+                // Navigate to login screen
+                if (mounted) {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    '/',
+                    (route) => false,
+                  );
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Account successfully deleted'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                // Close loading dialog
+                if (mounted) Navigator.pop(context);
+
+                // Show error
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: ${e.toString()}'),
+                      backgroundColor: AppTheme.errorRed,
+                    ),
+                  );
+                }
+              }
             },
             size: ButtonSize.small,
             variant: ButtonVariant.outline,

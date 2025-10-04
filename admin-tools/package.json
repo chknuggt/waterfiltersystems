@@ -1,0 +1,12 @@
+{
+  "name": "waterfilter-admin-tools",
+  "version": "1.0.0",
+  "description": "Admin tools for WaterFilterNet Firebase management",
+  "scripts": {
+    "migrate-users": "node migrate-auth-users.js",
+    "manage-admin": "node admin-manager.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}
